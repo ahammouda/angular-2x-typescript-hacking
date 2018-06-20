@@ -2,6 +2,7 @@ import * as d3 from 'd3';
 import {isNullOrUndefined} from 'util';
 
 export class RenderItem {
+  private static DELAY = 1000;
   /* Essentially a representation of the things needed to render d3 to the DOM */
   // TODO: Make these private when done debugging this class
   public id: string;
@@ -49,6 +50,12 @@ export class RenderItem {
     if (! isNullOrUndefined(this.textAttr) ) {
       selection.text( this.textAttr );
     }
+  }
 
+  remove() {
+    d3.select( this.getIdAccessor() )
+      .transition()
+      .delay(RenderItem.DELAY)
+      .remove();
   }
 }

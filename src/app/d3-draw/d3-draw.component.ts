@@ -5,12 +5,10 @@ import * as d3 from 'd3';
 import { Rectangle } from './Rectangle';
 import { GridPoint } from './GridPoint';
 
-import { PathTransition } from './PathTransition';
-
 import { Frame } from './Frame';
 import { RenderItem } from './RenderItem';
-import {text} from "@angular/core/src/render3/instructions";
-import {isNullOrUndefined} from "util";
+import {isNullOrUndefined} from 'util';
+import {NoSwitchCaseFallThroughWalker} from "tslint/lib/rules/noSwitchCaseFallThroughRule";
 
 const straightLine = d3.line()
   .x(function(d) { return d.x; })
@@ -52,8 +50,12 @@ export class D3DrawComponent implements OnInit {
 
   frames: Array<Frame> = [];
 
+  bboxItems: Array<RenderItem> = [];
+
   constructor() { }
 
+  /**
+   *  Initial rendering of elements */
   constructFrameOne() {
     const frame1 = new Frame();
 
@@ -93,23 +95,293 @@ export class D3DrawComponent implements OnInit {
       this.straightEdgeRenderItem(edge, 'edge1')
     );
 
-    // TODO: You need to refactor this, and determine how many renderItems this bbox will represent
-    // this.attachBBox(this.rectangles[1], 'id'); // Testing...
-    // this.attachBBox(this.rectangles[0], 'FK'); // Testing...
-
     let items = this.attachBBoxRenderItems(
       this.rectangles[1], 'id'
     );
     for (let i = 0; i < items.length; i++){
       frame1.addItem(items[i]);
+      this.bboxItems.push(items[i]);
     }
     items = this.attachBBoxRenderItems(
       this.rectangles[0], 'FK'
     );
     for (let i = 0; i < items.length; i++){
       frame1.addItem(items[i]);
+      this.bboxItems.push(items[i]);
     }
-    frame1.render();
+    return frame1;
+  }
+
+  /**
+   *  Moves arrows away from bbox to textbox */
+  constructFrameTwoA() {
+    const frameTwoA: Frame = new Frame();
+
+    // Slide edge arrows up to box (essentially same thing as before, but adding edge as 'delta' rather than 'item'
+    const source = this.getEdgeCoordinate(this.rectangles[0], true, true);
+    const target: GridPoint = this.getEdgeCoordinate(this.rectangles[1], false, true);
+
+    const arrow_points: Array<GridPoint> = this.getArrowHead(target);
+    // this.drawStraightEdge(arrow_points, 'tip-0');
+    frameTwoA.addDelta(
+      this.straightEdgeRenderItem(arrow_points, 'tip-0')
+    );
+    target.x = target.x + this.ARROW_LEN;
+
+    // Then draw line b/w
+    const edge: Array<GridPoint> = this.getJaggedEdge(source, target); // Get auxillary grid points
+    // this.drawStraightEdge(edge, 'edge1'); // Then draw them
+    frameTwoA.addDelta(
+      this.straightEdgeRenderItem(edge, 'edge1')
+    );
+
+    return frameTwoA;
+  }
+
+  /**
+     *  Remove all bbox items */
+  constructFrameTwo() {
+    const frameTwo: Frame = new Frame();
+    for (let i = 0; i < this.bboxItems.length; i++) {
+      frameTwo.addRemoveElement(
+        this.bboxItems[i]
+      );
+    }
+    return frameTwo;
+  }
+
+  /**
+     *  Changes label, and adjusts rectangle size, and moves arrow along with it */
+  constructFrameThree() {
+    // Remove All text but one letter from the text box and transition its width
+    const frameThree: Frame = new Frame();
+
+    // Adjust text and resize text box
+    this.rectangles[0].label = 'F';
+    this.rectangles[1].label = 'I';
+    for (let i = 0; i < this.rectangles.length; i++) {
+      // setWidth() must be called first be because placement of label depends on it
+      this.setWidth(this.rectangles[i]);
+      frameThree.addDelta(
+        this.textLabelToRenderItem(this.rectangles[i])
+      );
+    }
+
+    // This needs to be translated to the next render item that will update the rectangle width
+    for (let i = 0; i < this.rectangles.length; i++) {
+      const rectItem = new RenderItem(
+        this.rectangles[i].id, `svg`, 'rect'
+      );
+      rectItem.addAttr(
+        'width', this.rectangles[i].width
+      );
+      frameThree.addDelta(rectItem);
+    }
+
+    // Slide edge arrows along with rectangle width change
+    const source = this.getEdgeCoordinate(this.rectangles[0], true, true);
+    const target: GridPoint = this.getEdgeCoordinate(this.rectangles[1], false, true);
+
+    const arrow_points: Array<GridPoint> = this.getArrowHead(target);
+    // this.drawStraightEdge(arrow_points, 'tip-0');
+    frameThree.addDelta(
+      this.straightEdgeRenderItem(arrow_points, 'tip-0')
+    );
+    target.x = target.x + this.ARROW_LEN;
+
+    // Then draw line b/w
+    const edge: Array<GridPoint> = this.getJaggedEdge(source, target); // Get auxillary grid points
+    // this.drawStraightEdge(edge, 'edge1'); // Then draw them
+    frameThree.addDelta(
+      this.straightEdgeRenderItem(edge, 'edge1')
+    );
+
+    return frameThree;
+  }
+
+  /**
+   * Changes the edge to a curved edge from a flat arc */
+  constructFrameFour() {
+    const frameFour = new Frame();
+    // Reinitiate source and target
+    const new_source = this.getEdgeCoordinate(this.rectangles[0], true, true);
+    const new_target: GridPoint = this.getEdgeCoordinate(this.rectangles[1], false, true);
+
+    /* Draw edge */
+    // First draw arrow head and adjust the target x position (always assuming horizontal edges)
+    const new_arrow_points: Array<GridPoint> = this.getArrowHead(new_target);
+    new_target.x = new_target.x + this.ARROW_LEN;  // Undo last update to this
+    frameFour.addDelta(
+      this.straightEdgeRenderItem(new_arrow_points, 'tip-0')
+    );
+
+    // Then draw line b/w
+    const new_edge: Array<GridPoint> = this.getCurvedEdge(new_source, new_target); // Get auxillary grid points
+    frameFour.addDelta(
+      this.curvedEdgeRenderItem(new_edge, 'edge1')
+    );
+    return frameFour;
+  }
+
+  /**
+   *  Turns boxes into a circles */
+  constructFrameFive() {
+    const frameFive = new Frame();
+    this.rectangles[0].rx = 100;
+    this.rectangles[0].ry = 100;
+    this.rectangles[1].rx = 100;
+    this.rectangles[1].ry = 100;
+
+    for (let i = 0; i < this.rectangles.length; i++) {
+      const rectItem = new RenderItem(
+        this.rectangles[i].id, `svg`, 'rect'
+      );
+      rectItem.addAttr(
+        'rx', this.rectangles[i].rx
+      );
+      rectItem.addAttr(
+        'ry', this.rectangles[i].ry
+      );
+      frameFive.addDelta(rectItem);
+    }
+    return frameFive;
+  }
+
+  /**
+   * Now must 'sort' circles move the one up, and the other down along with the edge */
+  constructFrameSix() {
+    const frameSix = new Frame();
+    // Switch y coordinate of rectangles
+    const tmpy = this.rectangles[1].y;
+    this.rectangles[1].y = this.rectangles[0].y;
+    this.rectangles[0].y = tmpy;
+    for (let i = 0; i < this.rectangles.length; i++) {
+      // Adjust rectangle in circle form
+      const rectItem = new RenderItem(
+        this.rectangles[i].id, `svg`, 'rect'
+      );
+      rectItem.addAttr(
+        'y', this.rectangles[i].y + this.y_orig
+      );
+      frameSix.addDelta(rectItem);
+      // Adjust text label
+      const textItem = new RenderItem(
+        `l-${this.rectangles[i].id}`, `svg`, 'text'
+      );
+      textItem.addAttr(
+        'y', this.rectangles[i].y + this.y_orig + this.rectangles[i].height / 2 + this.center_padding
+      );
+      frameSix.addDelta(textItem);
+    }
+
+    // Reinitiate source and target
+    const new_source = this.getEdgeCoordinate(this.rectangles[0], true, true);
+    const new_target: GridPoint = this.getEdgeCoordinate(this.rectangles[1], false, true);
+
+    /* Draw edge */
+    // First draw arrow head and adjust the target x position (always assuming horizontal edges)
+    const new_arrow_points: Array<GridPoint> = this.getArrowHead(new_target);
+    new_target.x = new_target.x + this.ARROW_LEN;  // Undo last update to this
+    frameSix.addDelta(
+      this.straightEdgeRenderItem(new_arrow_points, 'tip-0')
+    );
+
+    // Then draw line b/w
+    const new_edge: Array<GridPoint> = this.getCurvedEdge(new_source, new_target); // Get auxillary grid points
+    frameSix.addDelta(
+      this.curvedEdgeRenderItem(new_edge, 'edge1')
+    );
+
+    return frameSix;
+  }
+
+  /**
+   * Transition layout to horizontal : [F] --> [I] */
+  constructFrameSeven() {
+    const frameSeven = new Frame();
+
+    // Adjust location of [I] node
+    this.rectangles[1].y = this.rectangles[0].y;
+    this.rectangles[1].x = this.rectangles[0].x + this.rectangles[0].width + this.TB_H * 4;
+
+    const rectItem = new RenderItem(
+      this.rectangles[1].id, `svg`, 'rect'
+    );
+    rectItem.addAttr(
+      'x', this.rectangles[1].x + this.x_orig
+    );
+    rectItem.addAttr(
+      'y', this.rectangles[1].y + this.y_orig
+    );
+    frameSeven.addDelta(rectItem);
+    const textItem = new RenderItem(
+      `l-${this.rectangles[1].id}`, `svg`, 'text'
+    );
+    textItem.addAttr(
+      'x', this.rectangles[1].x + this.x_orig + this.rectangles[1].width / 2
+    );
+    textItem.addAttr(
+      'y', this.rectangles[1].y + this.y_orig + this.rectangles[1].height / 2 + this.center_padding
+    );
+    frameSeven.addDelta(textItem);
+
+    // Reinstantiate edge
+    const source: GridPoint = this.getEdgeCoordinate(this.rectangles[0], true, true);
+    const target: GridPoint = this.getEdgeCoordinate(this.rectangles[1], false, true, true);
+
+    /* Draw edge */
+    // First draw arrow head and adjust the target x position (always assuming horizontal edges)
+    const arrow_points: Array<GridPoint> = this.getArrowHead(target, true);
+    // this.drawStraightEdge(arrow_points, 'tip-0');
+    frameSeven.addDelta(
+      this.straightEdgeRenderItem(arrow_points, 'tip-0')
+    );
+    target.x = target.x - this.ARROW_LEN;
+
+    // Then draw line b/w -- since the line we're drawing is straight, just need 2 points
+    source.x = source.x + this.x_orig;
+    source.y = source.y + this.y_orig;
+    target.x = target.x + this.x_orig;
+    target.y = target.y + this.y_orig;
+    frameSeven.addDelta(
+      this.straightEdgeRenderItem([source, target], 'edge1')
+    );
+    return frameSeven;
+  }
+
+  /**
+   *  Transition circles back to rectangles */
+  constructFrameEight() {
+    const frameEight = new Frame();
+    this.rectangles[0].rx = 0;
+    this.rectangles[0].ry = 0;
+    this.rectangles[1].rx = 0;
+    this.rectangles[1].ry = 0;
+
+    for (let i = 0; i < this.rectangles.length; i++) {
+      const rectItem = new RenderItem(
+        this.rectangles[i].id, `svg`, 'rect'
+      );
+      rectItem.addAttr(
+        'rx', this.rectangles[i].rx
+      );
+      rectItem.addAttr(
+        'ry', this.rectangles[i].ry
+      );
+      frameEight.addDelta(rectItem);
+    }
+    return frameEight;
+  }
+
+  /**
+   * Add full label back in */
+  constructFrameNine() {
+  }
+
+  constructFrameTen() {
+    /**
+     *  We're in new territory visually here - must conceive some representation of iterating over the csv file,
+     *  and populating new bboxes with elements */
   }
 
   ngOnInit() {
@@ -118,78 +390,44 @@ export class D3DrawComponent implements OnInit {
       .attr('viewBox', '-350 -250 700 500')
       .classed('svg-content', true);
 
-    this.constructFrameOne();
-    /* ************************************************************************************************************* */
-    // // TODO: Everything below should be put in it's own function or class, so you can set timeout on the whole process
-    // //       at once
-    // // Transition steps:
-    // //  1.) Remove All text but one letter from the text box and transition its width
-    // // Adjust text and resize text box
-    // this.rectangles[0].label = 'F';
-    // this.rectangles[1].label = 'I';
-    // this.rectangles[0].rx = 100;
-    // this.rectangles[0].ry = 100;
-    // this.rectangles[1].rx = 100;
-    // this.rectangles[1].ry = 100;
-    //
-    // for (let i = 0; i < this.rectangles.length; i++) {
-    //   this.setWidth(this.rectangles[i]);
-    // }
-    // for (let i = 0; i < this.rectangles.length; i++) {
-    //   this.rectangles[i].transition(this.x_orig, this.y_orig, this.center_padding);
-    // }
-    // // this.rectangles[0].toCircle();
-    // // this.rectangles[1].toCircle();
-    // // // d3.select(`svg rect#${this.rectangles[0].id}`)
-    // // //   .transition()
-    // // //   .duration(500)
-    // // //   .attr('width', this.rectangles[0].width);
-    // // //
-    // // // d3.select(`svg text#l-${this.rectangles[0].id}`)
-    // // //   .transition()
-    // // //   .attr('x', this.rectangles[0].x + this.x_orig + this.rectangles[0].width / 2)
-    // // //   .attr('y', this.rectangles[0].y + this.y_orig + this.rectangles[0].height / 2 + this.center_padding)
-    // // //   .text( this.rectangles[0].label );
-    //
-    // //  2.) Slide arrow points from the bBox to the text-box
-    // //  3.) Transition straight edge to Arc
-    // const new_source = this.getEdgeCoordinate(this.rectangles[0], true, true);
-    // const new_target: GridPoint = this.getEdgeCoordinate(this.rectangles[1], false, true);
-    //
-    // /* Draw edge */
-    // // First draw arrow head and adjust the target x position (always assuming horizontal edges)
-    //
-    // const new_arrow_points: Array<GridPoint> = this.getArrowHead(new_target);
-    // new_target.x = new_target.x + this.ARROW_LEN;  // Undo last update to this
-    //
-    // // Then draw line b/w
-    // const new_edge: Array<GridPoint> = this.getCurvedEdge(new_source, new_target); // Get auxillary grid points
-    //
-    // const t1 = new PathTransition('svg path#tip-0', new_arrow_points); // Seems we need absolute id specification here
-    // const t2 = new PathTransition('svg path#edge1', new_edge);
-    // t1.transition(straightLine);
-    // t2.transition(arcLine);
-    //
-    // //  4.) Remove the bBox
-    //
-    // // Remove bbox TODO - add the rest of this logic
-    // // This id is not an input to any creation function.  Any drawable created should have accessor methods to it's element
-    // // ID or IDs
-    // this.removeElement('svg text#l-key');
-    // this.removeElement( 'svg text#l-value');
-    // this.removeElement( 'svg rect#bbox-0');
-    // this.removeElement( 'svg path#bar-0');
-    //
-    // // TODO  6.) Transition circles to different order
-    //
-    // // TODO  7.) Transition circles back to rectangles with dependency layout
-  }
+    this.frames.push(
+      this.constructFrameOne()
+    );
+    this.frames.push(
+      this.constructFrameTwoA()
+    );
+    this.frames.push(
+      this.constructFrameTwo()
+    );
+    this.frames.push(
+      this.constructFrameThree()
+    );
+    this.frames.push(
+      this.constructFrameFour()
+    );
+    this.frames.push(
+      this.constructFrameFive()
+    );
+    this.frames.push(
+      this.constructFrameSix()
+    );
+    this.frames.push(
+      this.constructFrameSeven()
+    );
+    this.frames.push(
+      this.constructFrameEight()
+    );
+    this.frames[0].setNext(this.frames[1]);
+    this.frames[1].setNext(this.frames[2]);
+    this.frames[2].setNext(this.frames[3]);
+    this.frames[3].setNext(this.frames[4]);
+    this.frames[4].setNext(this.frames[5]);
+    this.frames[5].setNext(this.frames[6]);
+    this.frames[6].setNext(this.frames[7]);
+    this.frames[7].setNext(this.frames[8]);
 
-  removeElement(id: string) {
-    d3.selectAll( id )
-      .transition()
-      .duration(1000)
-      .remove();
+    this.frames[0].render();
+    this.frames[0].transition();
   }
 
   /**
@@ -197,14 +435,21 @@ export class D3DrawComponent implements OnInit {
    * @isSource if true is a source node coordinate (if false is a target node coordinate)
    * @fromRect if true implies you're pointing from the text box (rectangle) if false => pointing from it's bBox
    * */
-  getEdgeCoordinate(rectangle: Rectangle, isSource: boolean, fromRect: boolean) {
+  getEdgeCoordinate(rectangle: Rectangle, isSource: boolean, fromRect: boolean, fromLeft: boolean = false) {
     if (isSource) {
       let source: GridPoint;
       if (fromRect) {
-        source = {
-          x: rectangle.x + rectangle.width,
-          y: rectangle.y + rectangle.height / 2
-        };
+        if (fromLeft) {
+          source = {
+            x: rectangle.x,
+            y: rectangle.y + rectangle.height / 2
+          };
+        } else {
+          source = {
+            x: rectangle.x + rectangle.width,
+            y: rectangle.y + rectangle.height / 2
+          };
+        }
       } else {
         source = {
           x: rectangle.x + rectangle.width,
@@ -215,10 +460,17 @@ export class D3DrawComponent implements OnInit {
     } else {
       let target: GridPoint;
       if (fromRect) {
-        target = {
-          x: rectangle.x + rectangle.width,
-          y: rectangle.y + rectangle.height / 2
-        };
+        if (fromLeft) {
+          target = {
+            x: rectangle.x,
+            y: rectangle.y + rectangle.height / 2
+          };
+        } else {
+          target = {
+            x: rectangle.x + rectangle.width,
+            y: rectangle.y + rectangle.height / 2
+          };
+        }
       } else {
         target = {
           x: rectangle.x + rectangle.width,
@@ -229,18 +481,34 @@ export class D3DrawComponent implements OnInit {
     }
   }
 
-  getArrowHead(tip: GridPoint) {
+  getArrowHead(tip: GridPoint, pointsRight: boolean = false) {
     const points: Array<GridPoint> = [];
-    // One is down/one is up -- depending on your orientation
-    const top: GridPoint = {
-      x: tip.x + this.ARROW_LEN + this.x_orig,
-      y: tip.y - this.ARROW_LEN / 2 + this.y_orig
-    };
+    let top: GridPoint;
+    let bottom: GridPoint;
 
-    const bottom: GridPoint = {
-      x: tip.x + this.ARROW_LEN + this.x_orig,
-      y: tip.y + this.ARROW_LEN / 2 + this.y_orig
-    };
+    if (pointsRight) {
+      top = {
+        x: tip.x - this.ARROW_LEN + this.x_orig,
+        y: tip.y - this.ARROW_LEN / 2 + this.y_orig
+      };
+
+      bottom = {
+        x: tip.x - this.ARROW_LEN + this.x_orig,
+        y: tip.y + this.ARROW_LEN / 2 + this.y_orig
+      };
+
+    } else {
+      // One is down/one is up -- depending on your orientation
+      top = {
+        x: tip.x + this.ARROW_LEN + this.x_orig,
+        y: tip.y - this.ARROW_LEN / 2 + this.y_orig
+      };
+
+      bottom = {
+        x: tip.x + this.ARROW_LEN + this.x_orig,
+        y: tip.y + this.ARROW_LEN / 2 + this.y_orig
+      };
+    }
 
     // Draw triangle clockwise;
     points.push(top);
@@ -253,24 +521,6 @@ export class D3DrawComponent implements OnInit {
     points.push(top);
 
     return points;
-  }
-
-  drawStraightEdge(points: Array<GridPoint>, id: string = 'foo') {
-
-    d3.select('svg')
-      .append('path')
-      .attr('id', id)
-      .attr('d', straightLine(points) )
-      .attr('stroke', 'blue')
-      .attr('stroke-width', 1)
-      .attr('fill', 'none');
-
-    // If each attribute where in a list, you could do this by calling something like this:
-    // let selection = d3.select('svg').append('path');
-    // for (let i = 0; i < 5; i++) {
-    //   selection = selection.attr(kvs[i].key,kvs[i].value);
-    // }
-    // Text elements will be a little different because they'll end with .text( '' )
   }
 
   /**
@@ -353,121 +603,121 @@ export class D3DrawComponent implements OnInit {
     rectangle.width = rectangle.label.length * this.BW + this.BW;
   }
 
-  // drawTextBox(rectangle: Rectangle) {
-  //   d3.select('svg')
-  //     .append('rect')
-  //     .attr('id', rectangle.id)
-  //     .attr('rx', rectangle.rx)
-  //     .attr('ry', rectangle.ry)
-  //     .attr('x', rectangle.x + this.x_orig)
-  //     .attr('y', rectangle.y + this.y_orig)
-  //     .attr('width', rectangle.width)
-  //     .attr('height', rectangle.height)
-  //     .attr('fill', rectangle.color)
-  //     .attr('stroke', 'black')
-  //     .attr('opacity', '0.5');
-  //   d3.select('svg')
-  //     .append('text')
-  //     .attr('id', `l-${rectangle.id}`)
-  //     .attr('x', rectangle.x + this.x_orig + rectangle.width / 2)
-  //     .attr('y', rectangle.y + this.y_orig + rectangle.height / 2 + this.center_padding)
-  //     .attr('text-anchor', 'middle')
-  //     .text( rectangle.label );
-  // }
+  drawTextBox(rectangle: Rectangle) {
+    d3.select('svg')
+      .append('rect')
+      .attr('id', rectangle.id)
+      .attr('rx', rectangle.rx)
+      .attr('ry', rectangle.ry)
+      .attr('x', rectangle.x + this.x_orig)
+      .attr('y', rectangle.y + this.y_orig)
+      .attr('width', rectangle.width)
+      .attr('height', rectangle.height)
+      .attr('fill', rectangle.color)
+      .attr('stroke', 'black')
+      .attr('opacity', '0.5');
+    d3.select('svg')
+      .append('text')
+      .attr('id', `l-${rectangle.id}`)
+      .attr('x', rectangle.x + this.x_orig + rectangle.width / 2)
+      .attr('y', rectangle.y + this.y_orig + rectangle.height / 2 + this.center_padding)
+      .attr('text-anchor', 'middle')
+      .text( rectangle.label );
+  }
 
-  // attachBBox(rectangle: Rectangle, keyStr: string) {
-  //   // Creating the box
-  //   // This state gets lost short of referencing the overwritten label
-  //   const bbox: Rectangle = {
-  //     id: 'bbox-0',
-  //     x: 0,
-  //     y: rectangle.y + rectangle.height,
-  //     width: rectangle.width,
-  //     height: this.TB_H * 2,
-  //     color: 'green',
-  //     label: 'below'
-  //   };
-  //
-  //   // Creating the bar
-  //   const line_points: Array<GridPoint> = [];
-  //   line_points.push({
-  //     x: bbox.x + this.BW * 2 + this.x_orig,
-  //     y: bbox.y + this.y_orig
-  //   });
-  //   line_points.push({
-  //     x: bbox.x + this.BW * 2 + this.x_orig,
-  //     y: bbox.y + bbox.height + this.y_orig
-  //   });
-  //   // Drawing the bar
-  //   this.drawStraightEdge(line_points, 'bar-0');
-  //   // Drawing the box
-  //   // this.drawTextBox(bbox);
-  //   this.drawBBox(bbox, keyStr);
-  // }
-  //
-  // drawBBox(rectangle: Rectangle, keyStr: string) {
-  //   const val_buf = 4;
-  //
-  //   d3.select('svg')
-  //     .append('rect')
-  //     .attr('id', rectangle.id)
-  //     .attr('rx', rectangle.rx)
-  //     .attr('ry', rectangle.ry)
-  //     .attr('x', rectangle.x + this.x_orig)
-  //     .attr('y', rectangle.y + this.y_orig)
-  //     .attr('width', rectangle.width)
-  //     .attr('height', rectangle.height)
-  //     .attr('fill', rectangle.color)
-  //     .attr('stroke', 'black')
-  //     .attr('opacity', '0.5');
-  //
-  //   /* Draw Labels - SHOULD BE ABLE TO PARAMETERIZE THIS TO PERFORM OPS FOR ARBITRARY N-ROWS/COLS of 'theoretical data' */
-  //   // Key Label
-  //   d3.select('svg')
-  //     .append('text')
-  //     .attr('id', `l-key`)
-  //     .attr('x', rectangle.x + this.x_orig + val_buf ) // ** THIS + rectangle.width - val_buf could be the new source 'x'
-  //     .attr('y', rectangle.y + this.y_orig + this.BH )  // ** This could be the new source (+/- this.BH/2) 'y'
-  //     .attr('text-anchor', 'start')
-  //     .text( keyStr );
-  //     // .append('tspan')
-  //     // .attr('baseline-shift', 'sub')
-  //     // .attr('font-size', 10)
-  //     // .text('0')
-  //     // .select(function() {
-  //     //   return this.parentNode;
-  //     // })
-  //     // .insert('tspan')
-  //     // .text( ':' );
-  //
-  //
-  //   // Value Label (should be able to generalize and parameterize this in  a function for spitting out values)
-  //   d3.select('svg')
-  //     .append('text')
-  //     .attr('id', `l-value`)
-  //     .attr('x', rectangle.x + this.x_orig + this.BW * 2 + val_buf )
-  //     .attr('y', rectangle.y + this.y_orig + this.BH )
-  //     .attr('text-anchor', 'start')
-  //     .text( '...' );
-  //     // .append('tspan')
-  //     // .attr('baseline-shift', 'sub')
-  //     // .attr('font-size', 10)
-  //     // .text('0')
-  //     // .select(function() {
-  //     //   return this.parentNode;
-  //     // })
-  //     // .insert('tspan')
-  //     // .text( ',v' )
-  //     // .append('tspan')
-  //     // .attr('baseline-shift', 'sub')
-  //     // .attr('font-size', 10)
-  //     // .text('1')
-  //     // .select(function() {
-  //     //   return this.parentNode;
-  //     // })
-  //     // .insert('tspan')
-  //     // .text( ',...}' );
-  // }
+  attachBBox(rectangle: Rectangle, keyStr: string) {
+    // Creating the box
+    // This state gets lost short of referencing the overwritten label
+    const bbox: Rectangle = {
+      id: 'bbox-0',
+      x: 0,
+      y: rectangle.y + rectangle.height,
+      width: rectangle.width,
+      height: this.TB_H * 2,
+      color: 'green',
+      label: 'below'
+    };
+
+    // Creating the bar
+    const line_points: Array<GridPoint> = [];
+    line_points.push({
+      x: bbox.x + this.BW * 2 + this.x_orig,
+      y: bbox.y + this.y_orig
+    });
+    line_points.push({
+      x: bbox.x + this.BW * 2 + this.x_orig,
+      y: bbox.y + bbox.height + this.y_orig
+    });
+    // Drawing the bar
+    this.drawStraightEdge(line_points, 'bar-0');
+    // Drawing the box
+    // this.drawTextBox(bbox);
+    this.drawBBox(bbox, keyStr);
+  }
+
+  drawBBox(rectangle: Rectangle, keyStr: string) {
+    const val_buf = 4;
+
+    d3.select('svg')
+      .append('rect')
+      .attr('id', rectangle.id)
+      .attr('rx', rectangle.rx)
+      .attr('ry', rectangle.ry)
+      .attr('x', rectangle.x + this.x_orig)
+      .attr('y', rectangle.y + this.y_orig)
+      .attr('width', rectangle.width)
+      .attr('height', rectangle.height)
+      .attr('fill', rectangle.color)
+      .attr('stroke', 'black')
+      .attr('opacity', '0.5');
+
+    /* Draw Labels - SHOULD BE ABLE TO PARAMETERIZE THIS TO PERFORM OPS FOR ARBITRARY N-ROWS/COLS of 'theoretical data' */
+    // Key Label
+    d3.select('svg')
+      .append('text')
+      .attr('id', `l-key`)
+      .attr('x', rectangle.x + this.x_orig + val_buf ) // ** THIS + rectangle.width - val_buf could be the new source 'x'
+      .attr('y', rectangle.y + this.y_orig + this.BH )  // ** This could be the new source (+/- this.BH/2) 'y'
+      .attr('text-anchor', 'start')
+      .text( keyStr );
+      // .append('tspan')
+      // .attr('baseline-shift', 'sub')
+      // .attr('font-size', 10)
+      // .text('0')
+      // .select(function() {
+      //   return this.parentNode;
+      // })
+      // .insert('tspan')
+      // .text( ':' );
+
+
+    // Value Label (should be able to generalize and parameterize this in  a function for spitting out values)
+    d3.select('svg')
+      .append('text')
+      .attr('id', `l-value`)
+      .attr('x', rectangle.x + this.x_orig + this.BW * 2 + val_buf )
+      .attr('y', rectangle.y + this.y_orig + this.BH )
+      .attr('text-anchor', 'start')
+      .text( '...' );
+      // .append('tspan')
+      // .attr('baseline-shift', 'sub')
+      // .attr('font-size', 10)
+      // .text('0')
+      // .select(function() {
+      //   return this.parentNode;
+      // })
+      // .insert('tspan')
+      // .text( ',v' )
+      // .append('tspan')
+      // .attr('baseline-shift', 'sub')
+      // .attr('font-size', 10)
+      // .text('1')
+      // .select(function() {
+      //   return this.parentNode;
+      // })
+      // .insert('tspan')
+      // .text( ',...}' );
+  }
 
   attachBBoxRenderItems(rectangle: Rectangle, keyStr: string) {
     const val_buf = 4;
@@ -571,6 +821,15 @@ export class D3DrawComponent implements OnInit {
   straightEdgeRenderItem(points: Array<GridPoint>, id: string = 'foo') {
     const edgeItem = new RenderItem(id, 'svg', 'path');
     edgeItem.addAttr('d', straightLine(points));
+    edgeItem.addAttr('stroke', 'blue');
+    edgeItem.addAttr('stroke-width', 1);
+    edgeItem.addAttr('fill', 'none');
+    return edgeItem;
+  }
+
+  curvedEdgeRenderItem(points: Array<GridPoint>, id: string = 'foo') {
+    const edgeItem = new RenderItem(id, 'svg', 'path');
+    edgeItem.addAttr('d', arcLine(points));
     edgeItem.addAttr('stroke', 'blue');
     edgeItem.addAttr('stroke-width', 1);
     edgeItem.addAttr('fill', 'none');

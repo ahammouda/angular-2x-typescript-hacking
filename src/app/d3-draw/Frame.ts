@@ -7,6 +7,7 @@ import { isNullOrUndefined } from 'util';
 
 export class Frame {
   private static DURATION = 2500;
+  private static DELAY = 1000;
   // Any new SVG or DOM objects to be rendered in this frame using d3 are stored here
   private renderItems: Array<RenderItem> = [];
 
@@ -14,7 +15,7 @@ export class Frame {
   // idAccessor should be a fully qualified path to an element
   private renderDeltas: { [idAccessor: string]: RenderItem; } = { };
 
-  private removeDeltas: Array<string>;
+  private removeDeltas: Array<RenderItem> = [];
 
   private nextFrame: Frame;
   private lastFrame: Frame;
@@ -34,7 +35,7 @@ export class Frame {
   }
 
   addRemoveElement(item: RenderItem) {
-    this.removeDeltas.push( item.getIdAccessor() );
+    this.removeDeltas.push( item );
   }
 
   setNext(frame: Frame) {
@@ -49,18 +50,27 @@ export class Frame {
     }
   }
 
+  pruneItems() {
+    if ( !isNullOrUndefined(this.removeDeltas) ) {
+      for (let i = 0; i < this.removeDeltas.length; i++) {
+        this.removeDeltas[i].remove();
+      }
+    }
+  }
+
   transition() {
     // TODO: Need an additional loop to transition any remove items separately -- will be same as the below, only
     // TODO) inner .attr('','') will be replaced with remove()
+    let selection;
     if ( !isNullOrUndefined(this.renderDeltas) ) {
-      let selection;
 
       for (const idAccessor in this.renderDeltas) {
         if (this.renderDeltas.hasOwnProperty(idAccessor)) {
 
           selection = d3.select(idAccessor)
             .transition()
-            .duration(Frame.DURATION);
+            .duration(Frame.DURATION)
+            .delay(Frame.DELAY);
 
           for (const key in this.renderDeltas[idAccessor].attributes) {
             if (this.renderDeltas[idAccessor].attributes.hasOwnProperty(key)) {
@@ -71,19 +81,35 @@ export class Frame {
 
             }
           }
+
+          if (! isNullOrUndefined(this.renderDeltas[idAccessor].textAttr) ) {
+            selection.text( this.renderDeltas[idAccessor].textAttr );
+          }
+
         }
       }
-      if (!isNullOrUndefined(this.nextFrame)) {
+      if ( !isNullOrUndefined(this.nextFrame) && !isNullOrUndefined(selection) ) {
+        // THERE ARE not renderDeltas here, but there are pruneDeltas
         // TODO: Control this externally either by passing in the callback or some other mechanism
         selection.on(
           'end', function () {
+            // TODO: Right now you're only triggering this for the very last selection that gets instantiated in this loop
+            // TODO) you should call a .on( function for each selection, which increments a counter;
+            // TODO) when this counter === nDeltas ( or nDeltas - 1), THEN trigger this.nextFrame.render();
+            //        <-- You'll need to figure out what the javascript equivalent for making the variable atomic is
             this.nextFrame.render();
+            this.nextFrame.pruneItems();
             this.nextFrame.transition();
           }.bind(this));
+      } else if ( !isNullOrUndefined(this.nextFrame) && isNullOrUndefined(selection) ) {
+        this.nextFrame.render();
+        this.nextFrame.pruneItems();
+        this.nextFrame.transition();
       }
     } else {
       if (!isNullOrUndefined(this.nextFrame)) {
         this.nextFrame.render();
+        this.nextFrame.pruneItems();
         this.nextFrame.transition();
       }
     }
